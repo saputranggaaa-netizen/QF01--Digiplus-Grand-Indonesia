@@ -17,7 +17,8 @@ import {
   Clock,
   Play,
   Table,
-  CheckCircle2
+  CheckCircle2,
+  Layers
 } from 'lucide-react';
 
 interface AdministrationViewProps {
@@ -29,6 +30,7 @@ interface AdministrationViewProps {
   isRefreshing: boolean;
   onUpdateAutoSyncInterval: (secs: number) => void;
   onSimulateDataUpdate: (modifiedData: StoreOverviewData) => void;
+  onSelectTabToInspect?: (tabId: string) => void;
 }
 
 export const AdministrationView: React.FC<AdministrationViewProps> = ({
@@ -39,7 +41,8 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
   onRefresh,
   isRefreshing,
   onUpdateAutoSyncInterval,
-  onSimulateDataUpdate
+  onSimulateDataUpdate,
+  onSelectTabToInspect
 }) => {
   // Checklist State
   const [checklistSpv, setChecklistSpv] = useState([
@@ -328,19 +331,87 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
           </button>
         </div>
 
-        {/* Live Raw Table Inspector from Google Sheet */}
-        {sheetConfig.rawTableData && (
-          <div className="space-y-3 pt-2">
-            <div className="flex items-center justify-between">
+        {/* Multi-Tab Connection Overview Card */}
+        <div className="space-y-3 pt-1">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Layers size={16} className="text-blue-500" />
+              Tab / Sheet yang Terhubung ({sheetConfig.tabs?.filter((t) => t.enabled).length || 5} Tab Aktif)
+            </h3>
+            <button
+              onClick={onOpenGoogleSheetModal}
+              className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              <span>Atur Nama & Pemetaan Tab</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            {(sheetConfig.tabs || []).map((tab) => (
+              <div
+                key={tab.id}
+                className={`p-3 rounded-xl border text-xs flex flex-col justify-between ${
+                  tab.enabled && tab.status === 'synced'
+                    ? 'border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-950/20'
+                    : 'border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-900/40'
+                }`}
+              >
+                <div>
+                  <span className="font-bold text-slate-900 dark:text-white block truncate">
+                    {tab.name}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5 truncate">
+                    {tab.id.toUpperCase()}
+                  </span>
+                </div>
+                <div className="mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">
+                    {tab.rowCount ? `${tab.rowCount} baris` : 'Aktif'}
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Live Raw Table Inspector from Connected Google Sheets */}
+        <div className="space-y-3 pt-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Table size={16} className="text-emerald-500" />
-                Preview Data Mentah dari Google Sheet ({sheetConfig.rawTableData.totalRows} Baris)
+                Inspektor Data Multi-Sheet
               </h3>
-              <span className="text-[11px] text-slate-400">
-                Kolom terpetakan otomatis ke metriks toko QF10
-              </span>
+              <p className="text-[11px] text-slate-400">
+                Pilih tab di bawah untuk melihat isi baris dan kolom yang disinkronkan dari Google Spreadsheet.
+              </p>
             </div>
 
+            {/* Tab Selector Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+              {(sheetConfig.tabs || []).map((tab) => {
+                const isActive = (sheetConfig.activeTabId || 'transactions') === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => {
+                      onSelectTabToInspect?.(tab.id);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    {tab.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {sheetConfig.rawTableData && (
             <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
               <table className="w-full text-left text-xs font-mono">
                 <thead>
@@ -353,7 +424,7 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
-                  {sheetConfig.rawTableData.rows.slice(0, 10).map((row, rIdx) => (
+                  {sheetConfig.rawTableData.rows.slice(0, 15).map((row, rIdx) => (
                     <tr key={rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       {row.map((cell, cIdx) => (
                         <td key={cIdx} className="py-2 px-3 whitespace-nowrap">
@@ -365,8 +436,8 @@ export const AdministrationView: React.FC<AdministrationViewProps> = ({
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

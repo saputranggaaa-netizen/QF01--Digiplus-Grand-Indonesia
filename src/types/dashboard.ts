@@ -99,10 +99,24 @@ export interface StoreOverviewData {
   stockItems: StockItem[];
 }
 
+export interface SheetTabConfig {
+  id: string; // 'overview' | 'transactions' | 'staff' | 'daily' | 'soh' | 'focus' | custom
+  name: string; // Name of the tab in Google Sheets, e.g. "Overview", "Transactions", "Sheet1"
+  gid?: string; // Optional Google Sheet GID, e.g. "0"
+  description: string;
+  enabled: boolean;
+  status: 'synced' | 'pending' | 'error' | 'optional';
+  rowCount?: number;
+  lastSync?: string;
+  errorMessage?: string;
+}
+
 export interface GoogleSheetConfig {
   sheetUrl: string;
   sheetId: string;
-  sheetName?: string;
+  sheetName?: string; // Primary/active tab name
+  activeTabId?: string; // Currently previewed tab
+  tabs: SheetTabConfig[]; // Configured multiple tabs
   apiKey?: string;
   lastSyncedAt?: string;
   lastSyncedTimestamp?: number;
@@ -114,5 +128,12 @@ export interface GoogleSheetConfig {
     headers: string[];
     rows: (string | number)[][];
     totalRows: number;
+    sheetName?: string;
   };
+  tabTables?: Record<string, {
+    headers: string[];
+    rows: (string | number)[][];
+    totalRows: number;
+    sheetName: string;
+  }>;
 }

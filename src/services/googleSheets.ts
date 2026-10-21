@@ -1,4 +1,4 @@
-import { StoreOverviewData, GoogleSheetConfig, LOBMetric, StaffPerformance, DailySalesRecord, StockItem } from '../types/dashboard';
+import { StoreOverviewData, GoogleSheetConfig, SheetTabConfig, LOBMetric, StaffPerformance, DailySalesRecord, StockItem } from '../types/dashboard';
 import { INITIAL_DASHBOARD_DATA } from '../data/initialData';
 import { parseQF01TransactionCsv } from './qf01Parser';
 
@@ -7,10 +7,63 @@ const STORAGE_KEY_DATA = 'digiplus_store_data';
 
 export const LOCAL_QF01_ASSET_PATH = '/assets/aistudio/QF01_-YOUR_GOALS_50c7a0a7';
 
+export const DEFAULT_TABS: SheetTabConfig[] = [
+  {
+    id: 'overview',
+    name: 'Overview',
+    description: 'Target Toko, Pencapaian Kategori LOB (Apple, Android, Aksesoris, VAS) & Poin',
+    enabled: true,
+    status: 'synced',
+    rowCount: 13
+  },
+  {
+    id: 'transactions',
+    name: 'Transactions',
+    description: 'Ledger Transaksi Penjualan Riil (Invoice, SAP Article, Qty, Amount, Brand Name)',
+    enabled: true,
+    status: 'synced',
+    rowCount: 271
+  },
+  {
+    id: 'staff',
+    name: 'Staff_Performance',
+    description: 'Daftar Staf Sales, Target Penjualan Individu, Peran & Insentif',
+    enabled: true,
+    status: 'synced',
+    rowCount: 8
+  },
+  {
+    id: 'daily',
+    name: 'Daily_Sales',
+    description: 'Rincian & Target Penjualan Harian (30 Hari)',
+    enabled: true,
+    status: 'synced',
+    rowCount: 21
+  },
+  {
+    id: 'soh',
+    name: 'SOH',
+    description: 'Stok Fisik Toko (Stock on Hand), In Transit & Status Reorder',
+    enabled: true,
+    status: 'synced',
+    rowCount: 12
+  },
+  {
+    id: 'focus',
+    name: 'Target_Fokus',
+    description: 'Program Kampanye Khusus 3PP (Marshall, Anker) & VAS AppleCare+',
+    enabled: true,
+    status: 'synced',
+    rowCount: 4
+  }
+];
+
 export const DEFAULT_SHEET_CONFIG: GoogleSheetConfig = {
   sheetUrl: LOCAL_QF01_ASSET_PATH,
   sheetId: 'QF01_-YOUR_GOALS',
   sheetName: 'Transactions',
+  activeTabId: 'transactions',
+  tabs: DEFAULT_TABS,
   isAutoSync: true,
   autoSyncInterval: 30, // Auto-update every 30 seconds
   syncStatus: 'success',
@@ -45,7 +98,8 @@ export function loadSavedConfig(): GoogleSheetConfig {
       const parsed = JSON.parse(raw);
       return {
         ...DEFAULT_SHEET_CONFIG,
-        ...parsed
+        ...parsed,
+        tabs: parsed.tabs && parsed.tabs.length > 0 ? parsed.tabs : DEFAULT_TABS
       };
     }
   } catch (err) {
@@ -88,13 +142,25 @@ export interface FetchResult {
     headers: string[];
     rows: (string | number)[][];
     totalRows: number;
+    sheetName?: string;
   };
+  updatedTabs?: SheetTabConfig[];
+  tabTables?: Record<string, {
+    headers: string[];
+    rows: (string | number)[][];
+    totalRows: number;
+    sheetName: string;
+  }>;
 }
 
 /**
- * Fetch and parse data from Google Sheet or uploaded Sheet asset
+ * Fetch and parse data from Google Sheet with multi-tab support
  */
-export async function fetchGoogleSheetData(sheetIdOrUrl: string, sheetName?: string): Promise<FetchResult> {
+export async function fetchGoogleSheetData(
+  sheetIdOrUrl: string,
+  sheetName?: string,
+  configuredTabs: SheetTabConfig[] = DEFAULT_TABS
+): Promise<FetchResult> {
   const trimmed = (sheetIdOrUrl || '').trim();
 
   // If loading the user uploaded QF01 transaction file
@@ -104,8 +170,10 @@ export async function fetchGoogleSheetData(sheetIdOrUrl: string, sheetName?: str
       if (res.ok) {
         const csvContent = await res.text();
         const { data, rawRows } = parseQF01TransactionCsv(csvContent);
-        const headers = ['Date', 'Sales ID', 'Sales Name', 'Invoice', 'SAP Description', 'Qty', 'Amount', 'Product Type', 'Brand Name', 'Category'];
-        const sampleRows = rawRows.slice(0, 15).map((r) => [
+        
+        // Prepare multi-tab simulated tables
+        const transactionHeaders = ['Date', 'Sales ID', 'Sales Name', 'Invoice', 'SAP Description', 'Qty', 'Amount', 'Product Type', 'Brand Name', 'Category'];
+        const transactionRows = rawRows.slice(0, 25).map((r) => [
           r.date,
           r.salesId,
           r.salesName,
@@ -118,13 +186,68 @@ export async function fetchGoogleSheetData(sheetIdOrUrl: string, sheetName?: str
           r.groupCategory
         ]);
 
+        const overviewTable = {
+          headers: ['CATEGORY / METRIC', 'ACTUAL_SALES', 'TARGET_SALES', 'POIN', 'MAX_POIN', 'VARIANCE'],
+          rows: [
+            ['TOTAL SALES', data.totalSales, data.totalTarget, data.totalPointsEarned, 100, data.totalVariance],
+            ['APPLE', data.lobs.apple.actual, data.lobs.apple.target, data.lobs.apple.pointsEarned, 30, data.lobs.apple.variance],
+            ['ANDROID', data.lobs.android.actual, data.lobs.android.target, data.lobs.android.pointsEarned, 30, data.lobs.android.variance],
+            ['ACCESSORIES', data.lobs.accessories.actual, data.lobs.accessories.target, data.lobs.accessories.pointsEarned, 30, data.lobs.accessories.variance],
+            ['VAS', data.lobs.vas.actual, data.lobs.vas.target, data.lobs.vas.pointsEarned, 10, data.lobs.vas.variance]
+          ],
+          totalRows: 5,
+          sheetName: 'Overview'
+        };
+
+        const staffTable = {
+          headers: ['STAFF ID', 'STAFF NAME', 'ROLE', 'ACTUAL SALES', 'TARGET', 'ACHIEVE %', 'STATUS', 'TRX', 'UPT', 'ATV'],
+          rows: data.staffList.map((s) => [s.id, s.name, s.role, s.actualSales, s.targetSales, `${s.achievementPercent}%`, s.status, s.transactions, s.upt, s.atv]),
+          totalRows: data.staffList.length,
+          sheetName: 'Staff_Performance'
+        };
+
+        const dailyTable = {
+          headers: ['TANGGAL', 'ACTUAL SALES', 'TARGET', 'TRANSAKSI', 'UPT', 'ATV'],
+          rows: data.dailySales.map((d) => [d.dayLabel, d.actual, d.target, d.transactions, d.upt, d.atv]),
+          totalRows: data.dailySales.length,
+          sheetName: 'Daily_Sales'
+        };
+
+        const sohTable = {
+          headers: ['SKU', 'NAMA PRODUK', 'KATEGORI', 'SOH (UNIT)', 'IN TRANSIT', 'HARGA SATUAN', 'STATUS'],
+          rows: data.stockItems.map((st) => [st.sku, st.name, st.category, st.soh, st.intransit, st.unitPrice, st.status]),
+          totalRows: data.stockItems.length,
+          sheetName: 'SOH'
+        };
+
+        const tabTables: Record<string, any> = {
+          transactions: {
+            headers: transactionHeaders,
+            rows: transactionRows,
+            totalRows: rawRows.length,
+            sheetName: 'Transactions'
+          },
+          overview: overviewTable,
+          staff: staffTable,
+          daily: dailyTable,
+          soh: sohTable
+        };
+
+        const updatedTabs = configuredTabs.map((t) => ({
+          ...t,
+          status: 'synced' as const,
+          rowCount: tabTables[t.id]?.totalRows || t.rowCount || 0,
+          lastSync: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+        }));
+
+        const primaryTabId = sheetName ? (configuredTabs.find((t) => t.name.toLowerCase() === sheetName.toLowerCase())?.id || 'transactions') : 'transactions';
+        const primaryTable = tabTables[primaryTabId] || tabTables.transactions;
+
         return {
           data,
-          rawTable: {
-            headers,
-            rows: sampleRows,
-            totalRows: rawRows.length
-          }
+          rawTable: primaryTable,
+          updatedTabs,
+          tabTables
         };
       }
     } catch (e) {
@@ -132,7 +255,7 @@ export async function fetchGoogleSheetData(sheetIdOrUrl: string, sheetName?: str
     }
   }
 
-  // If using sample demo ID, return updated realistic initial data
+  // If using sample demo ID (QF10 Kokas)
   if (trimmed.includes('SAMPLE') || trimmed.includes('QF10')) {
     await new Promise((resolve) => setTimeout(resolve, 400));
     const currentData = loadSavedDashboardData();
@@ -148,9 +271,10 @@ export async function fetchGoogleSheetData(sheetIdOrUrl: string, sheetName?: str
         ['Store Name', currentData.storeName, '-', '-', '-', '-', '-'],
         ['Periode', currentData.period, '-', '-', '-', '-', '-']
       ],
-      totalRows: 8
+      totalRows: 8,
+      sheetName: 'Overview'
     };
-    return { data: currentData, rawTable };
+    return { data: currentData, rawTable, updatedTabs: configuredTabs };
   }
 
   const sheetId = extractSheetId(trimmed);
@@ -158,74 +282,83 @@ export async function fetchGoogleSheetData(sheetIdOrUrl: string, sheetName?: str
     throw new Error('ID atau URL Google Sheet tidak valid. Contoh format: https://docs.google.com/spreadsheets/d/1BxiMVs.../edit');
   }
 
-  // Attempt 1: Google Visualization API (GViz)
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${
-    sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''
-  }`;
+  // Multi-tab fetch loop for real Google Spreadsheets
+  const tabTables: Record<string, any> = {};
+  let mergedData = { ...INITIAL_DASHBOARD_DATA };
+  const updatedTabs: SheetTabConfig[] = [];
 
-  try {
-    const res = await fetch(gvizUrl, { cache: 'no-store' });
-    if (res.ok) {
-      const text = await res.text();
-      const jsonMatch = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
-      if (jsonMatch && jsonMatch[1]) {
-        const gvizData = JSON.parse(jsonMatch[1]);
-        if (gvizData.table && gvizData.table.rows && gvizData.table.rows.length > 0) {
-          // Check if table contains transaction columns
-          const firstCol = String(gvizData.table.cols?.[0]?.label || '').toLowerCase();
-          const secondCol = String(gvizData.table.cols?.[1]?.label || '').toLowerCase();
-          if (firstCol.includes('date') && secondCol.includes('sales')) {
-            // Convert GViz table to CSV string and parse
-            const csvText = gvizTableToCsv(gvizData.table);
-            const { data, rawRows } = parseQF01TransactionCsv(csvText);
-            return {
-              data,
-              rawTable: {
-                headers: gvizData.table.cols.map((c: any) => c.label || c.id),
-                rows: rawRows.slice(0, 15).map((r) => [r.date, r.salesId, r.salesName, r.invoice, r.sapDescription, r.qty, r.amount, r.productType, r.brandName, r.groupCategory]),
-                totalRows: rawRows.length
-              }
+  const enabledTabs = configuredTabs.filter((t) => t.enabled);
+  const targetTabs = enabledTabs.length > 0 ? enabledTabs : configuredTabs;
+
+  for (const tab of targetTabs) {
+    try {
+      const gvizUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json${
+        tab.name ? `&sheet=${encodeURIComponent(tab.name)}` : ''
+      }${tab.gid ? `&gid=${tab.gid}` : ''}`;
+
+      const res = await fetch(gvizUrl, { cache: 'no-store' });
+      if (res.ok) {
+        const text = await res.text();
+        const jsonMatch = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
+        if (jsonMatch && jsonMatch[1]) {
+          const gvizData = JSON.parse(jsonMatch[1]);
+          if (gvizData.table && gvizData.table.rows && gvizData.table.rows.length > 0) {
+            const table = gvizData.table;
+            const headers = (table.cols || []).map((c: any) => c.label || c.id || '');
+            const rows = (table.rows || []).map((r: any) => (r.c || []).map((cell: any) => (cell ? (cell.v !== undefined ? cell.v : cell.f) : '')));
+
+            tabTables[tab.id] = {
+              headers,
+              rows,
+              totalRows: rows.length,
+              sheetName: tab.name
             };
-          }
-          return parseGVizTableToDashboard(gvizData.table);
-        }
-      }
-    }
-  } catch (err: any) {
-    console.warn('GViz request failed, attempting CSV fallback...', err.message);
-  }
 
-  // Attempt 2: CSV export endpoint
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${
-    sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''
-  }`;
-
-  try {
-    const resCsv = await fetch(csvUrl, { cache: 'no-store' });
-    if (resCsv.ok) {
-      const csvText = await resCsv.text();
-      if (csvText && csvText.trim().length > 10) {
-        if (csvText.includes('Sales ID') || csvText.includes('SAP Article') || csvText.includes('Sales Name')) {
-          const { data, rawRows } = parseQF01TransactionCsv(csvText);
-          return {
-            data,
-            rawTable: {
-              headers: ['Date', 'Sales ID', 'Sales Name', 'Invoice', 'SAP Description', 'Qty', 'Amount', 'Product Type', 'Brand Name', 'Category'],
-              rows: rawRows.slice(0, 15).map((r) => [r.date, r.salesId, r.salesName, r.invoice, r.sapDescription, r.qty, r.amount, r.productType, r.brandName, r.groupCategory]),
-              totalRows: rawRows.length
+            // Process data depending on tab type
+            const csvText = gvizTableToCsv(table);
+            if (tab.id === 'transactions' || csvText.includes('Sales ID') || csvText.includes('SAP Article')) {
+              const { data: parsedData } = parseQF01TransactionCsv(csvText);
+              mergedData = { ...mergedData, ...parsedData };
+            } else if (tab.id === 'overview' || tab.name.toLowerCase().includes('overview')) {
+              const { data: ovData } = parseGVizTableToDashboard(table);
+              mergedData = { ...mergedData, lobs: ovData.lobs, totalSales: ovData.totalSales, totalTarget: ovData.totalTarget };
             }
-          };
+
+            updatedTabs.push({
+              ...tab,
+              status: 'synced',
+              rowCount: rows.length,
+              lastSync: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+            });
+            continue;
+          }
         }
-        return parseCsvToDashboard(csvText);
       }
+    } catch (tabErr: any) {
+      console.warn(`Tab ${tab.name} fetch failed:`, tabErr.message);
     }
-  } catch (csvErr: any) {
-    console.warn('CSV export endpoint failed:', csvErr.message);
+
+    updatedTabs.push({
+      ...tab,
+      status: tab.enabled ? 'error' : 'optional',
+      errorMessage: 'Tab tidak ditemukan atau belum dipublikasikan'
+    });
   }
 
-  throw new Error(
-    'Tidak dapat mengakses Google Sheet. Pastikan Spreadsheet Anda telah diset: Bagikan > Siapa saja yang memiliki link dapat melihat (Viewer).'
-  );
+  // If no specific multi-tab worked, fallback to primary sheet
+  const primaryTable = Object.values(tabTables)[0] || {
+    headers: ['Kolom 1', 'Kolom 2', 'Kolom 3'],
+    rows: [['Data belum tersinkronisasi']],
+    totalRows: 1,
+    sheetName: sheetName || 'Sheet1'
+  };
+
+  return {
+    data: mergedData,
+    rawTable: primaryTable,
+    updatedTabs,
+    tabTables
+  };
 }
 
 function gvizTableToCsv(table: any): string {
@@ -291,58 +424,11 @@ function parseGVizTableToDashboard(table: any): FetchResult {
   const rawTable = {
     headers: rawHeaders.length > 0 ? rawHeaders : ['Kolom A', 'Kolom B', 'Kolom C', 'Kolom D', 'Kolom E'],
     rows: rawRows,
-    totalRows: rawRows.length
+    totalRows: rawRows.length,
+    sheetName: 'Overview'
   };
 
   return { data: base, rawTable };
-}
-
-/**
- * Fallback CSV parser for summary sheets
- */
-function parseCsvToDashboard(csvText: string): FetchResult {
-  const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0 && !l.startsWith('#'));
-  const base = { ...INITIAL_DASHBOARD_DATA };
-  const rawRows: (string | number)[][] = [];
-  let headers: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const row = lines[i].split(',').map((item) => item.replace(/^"|"$/g, '').trim());
-    if (i === 0) {
-      headers = row;
-      continue;
-    }
-    rawRows.push(row);
-
-    const firstCell = (row[0] || '').toLowerCase();
-    if (firstCell.includes('store code') || firstCell.includes('kode toko')) {
-      base.storeCode = row[1] || base.storeCode;
-    } else if (firstCell.includes('total sales') || firstCell.includes('total penjualan')) {
-      const act = parseNumber(row[1]);
-      const tgt = parseNumber(row[2]);
-      if (act > 0) base.totalSales = act;
-      if (tgt > 0) base.totalTarget = tgt;
-    } else if (firstCell.includes('apple')) {
-      updateLobRow(base.lobs.apple, row);
-    } else if (firstCell.includes('android')) {
-      updateLobRow(base.lobs.android, row);
-    } else if (firstCell.includes('accessories') || firstCell.includes('aksesoris')) {
-      updateLobRow(base.lobs.accessories, row);
-    } else if (firstCell.includes('vas')) {
-      updateLobRow(base.lobs.vas, row);
-    }
-  }
-
-  recalculateTotals(base);
-
-  return {
-    data: base,
-    rawTable: {
-      headers: headers.length > 0 ? headers : ['CATEGORY', 'ACTUAL', 'TARGET', 'POINTS', 'VARIANCE'],
-      rows: rawRows,
-      totalRows: rawRows.length
-    }
-  };
 }
 
 function recalculateTotals(base: StoreOverviewData) {

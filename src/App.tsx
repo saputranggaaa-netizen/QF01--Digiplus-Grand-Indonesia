@@ -59,15 +59,19 @@ export default function App() {
     setIsRefreshing(true);
     try {
       if (sheetConfig.sheetUrl) {
-        const result = await fetchGoogleSheetData(sheetConfig.sheetUrl, sheetConfig.sheetName);
+        const result = await fetchGoogleSheetData(sheetConfig.sheetUrl, sheetConfig.sheetName, sheetConfig.tabs);
         setData(result.data);
         saveDashboardData(result.data);
+        const currentActiveTab = sheetConfig.activeTabId || 'transactions';
+        const activeTable = (result.tabTables && result.tabTables[currentActiveTab]) || result.rawTable;
         const updatedConfig: GoogleSheetConfig = {
           ...sheetConfig,
           lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           lastSyncedTimestamp: Date.now(),
           syncStatus: 'success',
-          rawTableData: result.rawTable
+          rawTableData: activeTable,
+          tabs: result.updatedTabs || sheetConfig.tabs,
+          tabTables: result.tabTables || sheetConfig.tabTables
         };
         setSheetConfig(updatedConfig);
         saveSheetConfig(updatedConfig);
@@ -136,6 +140,18 @@ export default function App() {
     setSheetConfig(updatedCfg);
     saveSheetConfig(updatedCfg);
     showToast('Data berhasil diperbarui secara langsung!');
+  };
+
+  // Handle switching active tab in inspector
+  const handleSelectTabToInspect = (tabId: string) => {
+    const table = sheetConfig.tabTables?.[tabId];
+    const updated: GoogleSheetConfig = {
+      ...sheetConfig,
+      activeTabId: tabId,
+      rawTableData: table || sheetConfig.rawTableData
+    };
+    setSheetConfig(updated);
+    saveSheetConfig(updated);
   };
 
   // Nav title mapping for Header Breadcrumb
@@ -314,6 +330,7 @@ export default function App() {
               isRefreshing={isRefreshing}
               onUpdateAutoSyncInterval={handleUpdateAutoSyncInterval}
               onSimulateDataUpdate={handleSimulateDataUpdate}
+              onSelectTabToInspect={handleSelectTabToInspect}
             />
           )}
         </main>

@@ -14,15 +14,20 @@ import {
   Clock,
   Layers,
   Upload,
-  Database
+  Database,
+  Plus,
+  Trash2,
+  CheckCircle2,
+  SlidersHorizontal
 } from 'lucide-react';
-import { GoogleSheetConfig, StoreOverviewData } from '../types/dashboard';
+import { GoogleSheetConfig, SheetTabConfig, StoreOverviewData } from '../types/dashboard';
 import {
   fetchGoogleSheetData,
   saveSheetConfig,
   saveDashboardData,
   generateGoogleSheetTemplateCsv,
   DEFAULT_SHEET_CONFIG,
+  DEFAULT_TABS,
   LOCAL_QF01_ASSET_PATH
 } from '../services/googleSheets';
 import { INITIAL_DASHBOARD_DATA } from '../data/initialData';
@@ -44,16 +49,45 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
   onDataLoaded
 }) => {
   const [sheetUrlInput, setSheetUrlInput] = useState(config.sheetUrl || '');
-  const [sheetNameInput, setSheetNameInput] = useState(config.sheetName || 'Overview');
+  const [tabs, setTabs] = useState<SheetTabConfig[]>(config.tabs && config.tabs.length > 0 ? config.tabs : DEFAULT_TABS);
   const [autoSyncSecs, setAutoSyncSecs] = useState<number>(config.autoSyncInterval);
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [showTabEditor, setShowTabEditor] = useState(true);
 
   if (!isOpen) return null;
 
-  const handleSync = async (customUrl?: string) => {
+  // Toggle tab enabled
+  const handleToggleTab = (id: string) => {
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t)));
+  };
+
+  // Change tab sheet name
+  const handleTabNameChange = (id: string, newName: string) => {
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, name: newName } : t)));
+  };
+
+  // Add custom tab
+  const handleAddCustomTab = () => {
+    const newId = `custom_${Date.now()}`;
+    const newTab: SheetTabConfig = {
+      id: newId,
+      name: `Sheet${tabs.length + 1}`,
+      description: 'Tab Kustom dari Google Spreadsheet',
+      enabled: true,
+      status: 'pending'
+    };
+    setTabs((prev) => [...prev, newTab]);
+  };
+
+  // Remove tab
+  const handleRemoveTab = (id: string) => {
+    setTabs((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleSyncAll = async (customUrl?: string) => {
     const targetUrl = customUrl !== undefined ? customUrl : sheetUrlInput;
     if (!targetUrl.trim()) {
       setStatusMessage({ type: 'error', text: 'Silakan masukkan link Google Sheet terlebih dahulu.' });
@@ -64,18 +98,21 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
     setStatusMessage(null);
 
     try {
-      const result = await fetchGoogleSheetData(targetUrl, sheetNameInput);
+      const result = await fetchGoogleSheetData(targetUrl, undefined, tabs);
+      const updatedTabsList = result.updatedTabs || tabs;
+
       const updatedConfig: GoogleSheetConfig = {
         ...config,
         sheetUrl: targetUrl,
-        sheetName: sheetNameInput,
+        tabs: updatedTabsList,
         autoSyncInterval: autoSyncSecs,
         isAutoSync: autoSyncSecs > 0,
         lastSyncedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         lastSyncedTimestamp: Date.now(),
         syncStatus: 'success',
         errorMessage: undefined,
-        rawTableData: result.rawTable
+        rawTableData: result.rawTable,
+        tabTables: result.tabTables
       };
       
       saveSheetConfig(updatedConfig);
@@ -83,15 +120,16 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
       onConfigChange(updatedConfig);
       onDataLoaded(result.data);
 
+      const syncedCount = updatedTabsList.filter((t) => t.status === 'synced').length;
       setStatusMessage({
         type: 'success',
-        text: `Berhasil tersinkronisasi! Data toko ${result.data.storeCode} (${result.data.storeName}) berhasil dimuat dengan ${result.rawTable.totalRows} baris transaksi.`
+        text: `Berhasil tersinkronisasi! ${syncedCount} sheet/tab berhasil terhubung untuk toko ${result.data.storeCode} (${result.data.storeName}).`
       });
     } catch (err: any) {
       const updatedConfig: GoogleSheetConfig = {
         ...config,
         sheetUrl: targetUrl,
-        sheetName: sheetNameInput,
+        tabs,
         autoSyncInterval: autoSyncSecs,
         syncStatus: 'error',
         errorMessage: err.message
@@ -110,27 +148,22 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
   // 1-Click Load QF01 Uploaded Sheet
   const handleLoadQF01 = () => {
     setSheetUrlInput(LOCAL_QF01_ASSET_PATH);
-    setSheetNameInput('Transactions');
-    handleSync(LOCAL_QF01_ASSET_PATH);
+    handleSyncAll(LOCAL_QF01_ASSET_PATH);
   };
 
   // 1-Click Load QF10 Screenshot Data
   const handleLoadQF10 = () => {
-    saveSheetConfig({
+    const updatedCfg: GoogleSheetConfig = {
       ...config,
       sheetUrl: 'SAMPLE_QF10_KOKAS',
       sheetId: 'SAMPLE_QF10_KOKAS',
       sheetName: 'Overview',
+      tabs: DEFAULT_TABS,
       syncStatus: 'success'
-    });
+    };
+    saveSheetConfig(updatedCfg);
     saveDashboardData(INITIAL_DASHBOARD_DATA);
-    onConfigChange({
-      ...config,
-      sheetUrl: 'SAMPLE_QF10_KOKAS',
-      sheetId: 'SAMPLE_QF10_KOKAS',
-      sheetName: 'Overview',
-      syncStatus: 'success'
-    });
+    onConfigChange(updatedCfg);
     onDataLoaded(INITIAL_DASHBOARD_DATA);
     setSheetUrlInput('SAMPLE_QF10_KOKAS');
     setStatusMessage({
@@ -157,12 +190,12 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
           onDataLoaded(data);
           setStatusMessage({
             type: 'success',
-            text: `File ${file.name} berhasil diunggah! Toko: ${data.storeCode} - ${rawRows.length} transaksi dihitung.`
+            text: `File ${file.name} berhasil diunggah! Toko: ${data.storeCode} - ${rawRows.length} transaksi riil dihitung.`
           });
         } else {
           setStatusMessage({
             type: 'info',
-            text: `File ${file.name} dibaca, memproses format umum.`
+            text: `File ${file.name} dibaca.`
           });
         }
       } catch (err: any) {
@@ -187,7 +220,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', 'Digiplus_Sales_Template.csv');
+    link.setAttribute('download', 'Digiplus_MultiSheet_Template.csv');
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -196,7 +229,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
       <div 
-        className="bg-white dark:bg-[#0f172a] rounded-2xl w-full max-w-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-white dark:bg-[#0f172a] rounded-2xl w-full max-w-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -207,13 +240,13 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                Sumber Data Google Sheet
+                Integrasi Banyak Sheet / Multi-Tab
                 <span className="text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
-                  {autoSyncSecs > 0 ? `Auto-Sync ${autoSyncSecs}s` : 'Manual Sync'}
+                  {tabs.filter((t) => t.enabled).length} Tab Aktif
                 </span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Hubungkan Google Spreadsheet toko Anda atau gunakan data transaksi riil.
+                Hubungkan dan petakan beberapa tab/sheet sekaligus dari satu Google Spreadsheet toko Anda.
               </p>
             </div>
           </div>
@@ -253,7 +286,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
           {/* Quick Preset Selector Buttons */}
           <div className="space-y-2">
             <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
-              Pilihan Cepat Sumber Data (Preset):
+              Pilihan Cepat Sumber Spreadsheet:
             </span>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <button
@@ -267,11 +300,11 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
                     QF01 - YOUR GOALS
                   </span>
                   <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-sm bg-emerald-200 dark:bg-emerald-800 text-emerald-800 dark:text-emerald-200">
-                    File Terunggah
+                    Banyak Tab
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
-                  Data 158 transaksi riil lengkap (Apple, Android, Aksesoris, VAS, Staf).
+                  Otomatis hubungkan tab Transaksi, Overview, Staff, Daily Sales & SOH.
                 </p>
               </button>
 
@@ -290,17 +323,17 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
-                  Dataset Rp 7.54 Miliar sesuai tampilan tangkapan layar.
+                  Dataset ringkasan Rp 7.54 Miliar sesuai tampilan tangkapan layar.
                 </p>
               </button>
             </div>
           </div>
 
-          {/* URL & Tab Input Form */}
-          <div className="space-y-4 pt-1">
+          {/* URL & Main Settings */}
+          <div className="space-y-3">
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center justify-between">
-                <span>Atau Tempel Link / ID Google Spreadsheet Anda</span>
+                <span>Link Google Spreadsheet (Workbook Utama)</span>
                 {config.lastSyncedAt && (
                   <span className="text-[11px] font-normal text-slate-400">
                     Terakhir diperbarui: {config.lastSyncedAt}
@@ -315,56 +348,130 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
                 placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs.../edit"
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono shadow-xs"
               />
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Mendukung link Google Sheets publik atau ID Spreadsheet.
-              </p>
             </div>
 
-            {/* Row of Tab Name and Auto-Sync Interval */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Layers size={14} className="text-blue-500" />
-                  Nama Tab / Sheet:
-                </label>
-                <input
-                  type="text"
-                  value={sheetNameInput}
-                  onChange={(e) => setSheetNameInput(e.target.value)}
-                  placeholder="Transactions atau Overview"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+            {/* Auto-Sync Interval Setting */}
+            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-emerald-500" />
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  Pembaruan Otomatis (Auto-Sync Semua Sheet):
+                </span>
+              </div>
+              <select
+                value={autoSyncSecs}
+                onChange={(e) => setAutoSyncSecs(Number(e.target.value))}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value={0}>Mati (Hanya refresh manual)</option>
+                <option value={15}>Setiap 15 Detik</option>
+                <option value={30}>Setiap 30 Detik (Disarankan)</option>
+                <option value={60}>Setiap 1 Menit</option>
+                <option value={300}>Setiap 5 Menit</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Multi-Tab Connection Manager Section */}
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Layers size={16} className="text-blue-500" />
+                  Daftar Tab / Sheet yang Dihubungkan ({tabs.length} Tab)
+                </span>
+                <p className="text-[11px] text-slate-500">
+                  Sesuaikan nama tab di bawah dengan nama sheet asli di Google Spreadsheet Anda.
+                </p>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Clock size={14} className="text-emerald-500" />
-                  Otomatis Perbarui (Auto-Sync):
-                </label>
-                <select
-                  value={autoSyncSecs}
-                  onChange={(e) => setAutoSyncSecs(Number(e.target.value))}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              <button
+                type="button"
+                onClick={handleAddCustomTab}
+                className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 cursor-pointer bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800"
+              >
+                <Plus size={13} />
+                <span>Tambah Tab Baru</span>
+              </button>
+            </div>
+
+            {/* List of Configured Tabs */}
+            <div className="space-y-2">
+              {tabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`p-3 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                    tab.enabled
+                      ? 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/60'
+                      : 'border-slate-100 dark:border-slate-800/40 bg-slate-50/50 dark:bg-slate-900/30 opacity-60'
+                  }`}
                 >
-                  <option value={0}>Mati (Hanya tombol refresh manual)</option>
-                  <option value={15}>Setiap 15 Detik</option>
-                  <option value={30}>Setiap 30 Detik (Disarankan)</option>
-                  <option value={60}>Setiap 1 Menit</option>
-                  <option value={300}>Setiap 5 Menit</option>
-                </select>
-              </div>
+                  <div className="flex items-center gap-3">
+                    {/* Checkbox */}
+                    <input
+                      type="checkbox"
+                      checked={tab.enabled}
+                      onChange={() => handleToggleTab(tab.id)}
+                      className="w-4 h-4 rounded-sm text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          {tab.id.toUpperCase()}
+                        </span>
+                        <span
+                          className={`text-[10px] px-2 py-0.2 rounded-full font-semibold ${
+                            tab.status === 'synced'
+                              ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                              : tab.status === 'error'
+                              ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
+                              : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {tab.status === 'synced' ? 'Tersinkron' : tab.status === 'error' ? 'Gagal' : 'Siap'}
+                          {tab.rowCount ? ` (${tab.rowCount} baris)` : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{tab.description}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 pl-7 sm:pl-0">
+                    <span className="text-[11px] text-slate-400 whitespace-nowrap">Nama Sheet:</span>
+                    <input
+                      type="text"
+                      value={tab.name}
+                      onChange={(e) => handleTabNameChange(tab.id, e.target.value)}
+                      placeholder="Nama tab di Google Sheet"
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 max-w-[160px]"
+                    />
+
+                    {tab.id.startsWith('custom_') && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTab(tab.id)}
+                        className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
+                        title="Hapus tab"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <button
-              onClick={() => handleSync()}
+              onClick={() => handleSyncAll()}
               disabled={isLoading}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm transition-all shadow-md shadow-emerald-700/20 cursor-pointer disabled:opacity-60"
             >
               <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
-              <span>{isLoading ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}</span>
+              <span>{isLoading ? 'Menyinkronkan Semua Tab...' : 'Sinkronkan Semua Sheet / Tab'}</span>
             </button>
 
             {/* Upload File button */}
@@ -380,7 +487,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                 <FileSpreadsheet size={16} className="text-emerald-500" />
-                Template Format Kolom Google Sheet
+                Template Format Banyak Sheet (Multi-Sheet)
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -401,7 +508,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
             </div>
 
             <p className="text-xs text-slate-600 dark:text-slate-400">
-              Format mencakup kolom transaksi penjualan untuk Apple, Android, Aksesoris, VAS, total pencapaian, dan metrik tim toko Digiplus.
+              Format mencakup contoh kolom transaksi penjualan Apple, Android, Aksesoris, VAS, total pencapaian, dan metrik tim toko Digiplus.
             </p>
           </div>
 
@@ -413,7 +520,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
             >
               <span className="flex items-center gap-1.5">
                 <HelpCircle size={15} className="text-blue-500" />
-                Langkah Cepat Membagikan Google Sheet:
+                Cara Menghubungkan Banyak Tab di Google Sheets:
               </span>
               <span className="text-blue-500 text-[11px]">
                 {showInstructions ? 'Sembunyikan' : 'Tampilkan Panduan'}
@@ -423,17 +530,16 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
             {showInstructions && (
               <ol className="text-xs text-slate-600 dark:text-slate-400 space-y-2 pl-4 list-decimal leading-relaxed bg-blue-50/40 dark:bg-blue-950/20 p-3.5 rounded-xl border border-blue-100/70 dark:border-blue-900/30">
                 <li>
-                  Buka Google Spreadsheet Anda di browser.
+                  Buka Google Spreadsheet Anda yang memiliki banyak tab di bagian bawah (misal: <em>Overview</em>, <em>Transactions</em>, <em>Staff</em>).
                 </li>
                 <li>
-                  Klik tombol hijau <strong>Bagikan (Share)</strong> di kanan atas spreadsheet.
+                  Klik tombol <strong>Bagikan (Share)</strong> di kanan atas spreadsheet, setel Akses Umum ke <strong>&quot;Siapa saja yang memiliki link&quot;</strong> sebagai <strong>Pelihat (Viewer)</strong>.
                 </li>
                 <li>
-                  Di bagian <em>Akses Umum (General access)</em>, ganti dari &quot;Dibatasi (Restricted)&quot; menjadi{' '}
-                  <strong className="text-emerald-600 dark:text-emerald-400">&quot;Siapa saja yang memiliki link&quot; (Anyone with the link)</strong> dengan peran <strong>Pelihat (Viewer)</strong>.
+                  Pastikan nama-nama sheet di daftar tab di atas sama persis dengan nama tab di spreadsheet Anda.
                 </li>
                 <li>
-                  Klik <strong>Salin Link (Copy Link)</strong>, tempelkan di kotak input di atas, lalu klik tombol <strong>Sinkronkan Sekarang</strong>.
+                  Klik <strong>Sinkronkan Semua Sheet / Tab</strong>. Dashboard akan membaca seluruh tab dan menggabungkan datanya secara terpadu!
                 </li>
               </ol>
             )}
@@ -443,7 +549,7 @@ export const GoogleSheetModal: React.FC<GoogleSheetModalProps> = ({
         {/* Footer */}
         <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
           <span className="text-[11px] text-slate-400">
-            Digiplus Store Intelligence • Real-time Sheet Sync
+            Digiplus Multi-Tab Sheet Synchronization • Live Connected
           </span>
           <button
             onClick={onClose}
