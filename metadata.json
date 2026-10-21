@@ -1,0 +1,6 @@
+{
+  "name": "Digiplus Kota Kasablanka - Sales Dashboard",
+  "description": "Dashboard performa penjualan toko Digiplus (QF10) dengan integrasi Google Sheet, monitoring target LOB, Apple, Android, Aksesoris, VAS, dan kinerja staff.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
